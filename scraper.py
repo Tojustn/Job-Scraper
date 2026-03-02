@@ -117,6 +117,42 @@ async def _handle_login(page: Page) -> None:
         print("[scraper] If you use Google/LinkedIn SSO, run `python login.py` once to save your session.")
 
 
+async def _apply_filters(page: Page) -> None:
+    """Try to apply Job Type: Internship filter on the page."""
+    try:
+        # Look for a "Job Type" filter button and click it
+        job_type_btn = page.get_by_text("Job Type", exact=False).first
+        await job_type_btn.click(timeout=5_000)
+        await asyncio.sleep(1)
+
+        # Click "Internship" option
+        await page.get_by_text("Internship", exact=True).first.click(timeout=5_000)
+        await asyncio.sleep(3)
+        print("[scraper] Applied Job Type: Internship filter.")
+    except Exception as e:
+        print(f"[scraper] Could not apply Job Type filter: {e}")
+
+    try:
+        # Look for "Job Function" filter
+        job_fn_btn = page.get_by_text("Job Function", exact=False).first
+        await job_fn_btn.click(timeout=5_000)
+        await asyncio.sleep(1)
+
+        for label in ["Full Stack Engineer", "Backend Engineer", "Python Engineer", "C/C++ Engineer"]:
+            try:
+                await page.get_by_text(label, exact=True).first.click(timeout=3_000)
+                await asyncio.sleep(0.5)
+                print(f"[scraper] Selected job function: {label}")
+            except Exception:
+                print(f"[scraper] Could not find job function option: {label}")
+
+        # Close the dropdown by pressing Escape
+        await page.keyboard.press("Escape")
+        await asyncio.sleep(3)
+    except Exception as e:
+        print(f"[scraper] Could not apply Job Function filter: {e}")
+
+
 async def scrape_jobs() -> list[dict]:
     """
     Open the JobRight jobs page using a persistent browser context, intercept API
@@ -134,10 +170,11 @@ async def scrape_jobs() -> list[dict]:
             if "recommend/landing/jobs" in response.url or "recent/landing/jobs" in response.url:
                 job_list = body.get("result", {}).get("jobList", [])
                 for item in job_list:
-                    job_result = item.get("jobResult", item)
-                    captured_jobs.append(job_result)
-                if job_list:
-                    print(f"[scraper] First job keys: {list(job_list[0].get('jobResult', job_list[0]).keys())}")
+                    job_result = item.get("jobResult", {})
+                    # Merge parent item fields (contains companyName etc.) with jobResult
+                    merged = {**item, **job_result}
+                    merged.pop("jobResult", None)
+                    captured_jobs.append(merged)
                 print(f"[scraper] Intercepted {len(job_list)} job(s) from {response.url}")
         except Exception:
             pass  # Not valid JSON or parse error — skip silently
@@ -169,13 +206,8 @@ async def scrape_jobs() -> list[dict]:
             await asyncio.sleep(5)
             print(f"[scraper] After login, landed on: {page.url}")
 
-        # Click "Most Recent" tab to get chronological results
-        try:
-            await page.get_by_text("Most Recent", exact=True).first.click()
-            print("[scraper] Clicked 'Most Recent' tab.")
-            await asyncio.sleep(3)
-        except Exception:
-            print("[scraper] Could not find 'Most Recent' tab — using default tab.")
+        # Apply filters: Job Type = Internship, then job function keywords
+        await _apply_filters(page)
 
         # Brief pause + scroll to trigger lazy-loaded content
         await asyncio.sleep(3)
