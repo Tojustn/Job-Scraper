@@ -51,6 +51,7 @@ def _normalize_job(raw: dict) -> Optional[dict]:
     salary = raw.get("salaryDesc") or raw.get("salary") or None
     posted_at = raw.get("publishTimeDesc") or raw.get("publishTime") or None
     work_model = raw.get("workModel") or None
+    logo = raw.get("jdLogo") or raw.get("logo") or raw.get("companyLogo") or None
     return {
         "id": str(job_id),
         "title": title,
@@ -61,6 +62,7 @@ def _normalize_job(raw: dict) -> Optional[dict]:
         "salary": salary,
         "postedAt": posted_at,
         "workModel": work_model,
+        "logo": logo,
     }
 
 

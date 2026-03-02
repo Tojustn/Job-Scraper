@@ -59,46 +59,67 @@ def send_discord_notification(job: dict) -> None:
             return
 
 
-def send_email_notification(job: dict) -> None:
-    if not GMAIL_APP_PASSWORD:
+def send_email_digest(jobs: list) -> None:
+    if not GMAIL_APP_PASSWORD or not jobs:
         return
 
-    title = job.get("title", "Unknown Title")
-    company = job.get("company", "Unknown Company")
-    location = job.get("location", "Unknown Location")
-    url = job.get("url", "")
-    salary = job.get("salary", "")
-    work_model = job.get("workModel", "")
-    posted_at = job.get("postedAt", "")
+    def job_card(job: dict) -> str:
+        title = job.get("title", "Unknown Title")
+        company = job.get("company", "Unknown Company")
+        location = job.get("location", "Unknown Location")
+        url = job.get("url", "")
+        salary = job.get("salary", "")
+        work_model = job.get("workModel", "")
+        posted_at = job.get("postedAt", "")
+        logo = job.get("logo", "")
 
-    rows = f"""
-        <tr><td><b>Company</b></td><td>{company}</td></tr>
-        <tr><td><b>Location</b></td><td>{location}</td></tr>
-    """
-    if work_model:
-        rows += f"<tr><td><b>Work Model</b></td><td>{work_model}</td></tr>"
-    if salary:
-        rows += f"<tr><td><b>Pay</b></td><td>{salary}</td></tr>"
-    if posted_at:
-        rows += f"<tr><td><b>Posted</b></td><td>{posted_at}</td></tr>"
+        logo_html = (
+            f'<img src="{logo}" alt="{company}" '
+            f'style="width:48px;height:48px;object-fit:contain;border-radius:8px;margin-right:12px">'
+            if logo else
+            f'<div style="width:48px;height:48px;background:#e8f5e9;border-radius:8px;'
+            f'margin-right:12px;display:flex;align-items:center;justify-content:center;'
+            f'font-size:20px">🏢</div>'
+        )
+
+        meta = " · ".join(filter(None, [location, work_model, salary, posted_at]))
+
+        return f"""
+        <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;margin-bottom:10px">
+            {logo_html}
+            <div>
+              <div style="font-size:16px;font-weight:bold">{title}</div>
+              <div style="color:#555;font-size:14px">{company}</div>
+            </div>
+          </div>
+          <div style="color:#777;font-size:13px;margin-bottom:12px">{meta}</div>
+          <a href="{url}" style="background:#2d7d46;color:white;padding:8px 16px;
+             text-decoration:none;border-radius:6px;font-size:13px;display:inline-block">
+            View &amp; Apply
+          </a>
+        </div>
+        """
+
+    cards = "".join(job_card(j) for j in jobs)
+    count = len(jobs)
+    subject = f"{count} New Internship{'s' if count > 1 else ''} on JobRight"
 
     html = f"""
-    <html><body style="font-family:sans-serif;max-width:600px;margin:auto">
-      <h2 style="color:#2d7d46">New Internship: {title}</h2>
-      <table cellpadding="8" style="border-collapse:collapse;width:100%">
-        {rows}
-      </table>
-      <br>
-      <a href="{url}" style="background:#2d7d46;color:white;padding:10px 20px;
-         text-decoration:none;border-radius:5px;display:inline-block">
-        View &amp; Apply
-      </a>
-      <p style="color:#888;font-size:12px;margin-top:24px">JobRight Scraper</p>
+    <html><body style="font-family:sans-serif;max-width:620px;margin:auto;padding:20px">
+      <h2 style="color:#2d7d46;margin-bottom:4px">{subject}</h2>
+      <p style="color:#888;font-size:13px;margin-top:0;margin-bottom:20px">
+        Matching your filters on JobRight AI
+      </p>
+      {cards}
+      <p style="color:#aaa;font-size:11px;margin-top:24px;text-align:center">
+        JobRight Scraper · Checks every 30 minutes
+      </p>
     </body></html>
     """
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"New Internship: {title} @ {company}"
+    msg["Subject"] = subject
     msg["From"] = NOTIFY_EMAIL
     msg["To"] = NOTIFY_EMAIL
     msg.attach(MIMEText(html, "html"))
@@ -107,6 +128,6 @@ def send_email_notification(job: dict) -> None:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(NOTIFY_EMAIL, GMAIL_APP_PASSWORD)
             smtp.sendmail(NOTIFY_EMAIL, NOTIFY_EMAIL, msg.as_string())
-        print(f"[notifier] Email sent: {title} @ {company}")
+        print(f"[notifier] Email digest sent: {count} job(s)")
     except Exception as e:
         print(f"[notifier] Email failed: {e}")
