@@ -6,6 +6,29 @@ from playwright.async_api import async_playwright, Response, Page
 
 import config
 
+ROLE_KEYWORDS = [
+    "full stack", "fullstack", "full-stack",
+    "backend", "back end", "back-end",
+    "python",
+    "c++", "c/c++",
+    "software engineer", "software developer", "swe",
+]
+
+INTERNSHIP_KEYWORDS = ["intern", "internship", "co-op", "coop"]
+
+
+def _matches_filter(job: dict) -> bool:
+    title = (job.get("jobTitle") or job.get("title") or "").lower()
+    seniority = (job.get("jobSeniority") or "").lower()
+
+    is_internship = (
+        any(k in seniority for k in INTERNSHIP_KEYWORDS)
+        or any(k in title for k in INTERNSHIP_KEYWORDS)
+    )
+    is_target_role = any(k in title for k in ROLE_KEYWORDS)
+
+    return is_internship and is_target_role
+
 
 def _is_job_like(obj: dict) -> bool:
     """Heuristic: an object looks like a job if it has id + title + company fields."""
@@ -113,6 +136,8 @@ async def scrape_jobs() -> list[dict]:
                 for item in job_list:
                     job_result = item.get("jobResult", item)
                     captured_jobs.append(job_result)
+                if job_list:
+                    print(f"[scraper] First job keys: {list(job_list[0].get('jobResult', job_list[0]).keys())}")
                 print(f"[scraper] Intercepted {len(job_list)} job(s) from {response.url}")
         except Exception:
             pass  # Not valid JSON or parse error — skip silently
@@ -176,7 +201,9 @@ async def scrape_jobs() -> list[dict]:
             "[scraper] WARNING: No jobs were intercepted. "
             "The API structure may have changed — inspect network traffic manually."
         )
-    else:
-        print(f"[scraper] Total unique jobs found: {len(normalized)}")
+        return normalized
 
-    return normalized
+    print(f"[scraper] Total jobs before filter: {len(normalized)}")
+    filtered = [j for j in normalized if _matches_filter(j)]
+    print(f"[scraper] Jobs matching filter (internship + role): {len(filtered)}")
+    return filtered
