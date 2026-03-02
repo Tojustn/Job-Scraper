@@ -33,6 +33,7 @@ jobs:
         env:
           JOBRIGHT_SESSION_ID: ${{ secrets.JOBRIGHT_SESSION_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           JOBS_URL: 'https://jobright.ai/jobs/recommend'
         run: python main.py --once
 

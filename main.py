@@ -3,7 +3,7 @@ import sys
 
 import config
 from scraper import scrape_jobs
-from notifier import send_discord_notification
+from notifier import send_discord_notification, send_email_notification
 from storage import load_seen_jobs, save_seen_jobs
 
 
@@ -16,6 +16,7 @@ async def run_once(seen: set) -> set:
         print(f"[main] {len(new_jobs)} new job(s) found — sending notifications...")
         for job in new_jobs:
             send_discord_notification(job)
+            send_email_notification(job)
             seen.add(job["id"])
     else:
         print("[main] No new jobs since last check.")
