@@ -134,6 +134,14 @@ async def scrape_jobs() -> list[dict]:
             # Navigate again after login
             await page.goto(config.JOBS_URL, wait_until="networkidle", timeout=60_000)
 
+        # Click "Most Recent" tab to get chronological results
+        try:
+            await page.get_by_text("Most Recent", exact=True).first.click()
+            print("[scraper] Clicked 'Most Recent' tab.")
+            await page.wait_for_load_state("networkidle", timeout=15_000)
+        except Exception:
+            print("[scraper] Could not find 'Most Recent' tab — using default tab.")
+
         # Brief pause + scroll to trigger lazy-loaded content
         await asyncio.sleep(3)
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
