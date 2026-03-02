@@ -48,6 +48,9 @@ def _normalize_job(raw: dict) -> Optional[dict]:
     )
     job_url = raw.get("url") or f"https://jobright.ai/jobs/info/{job_id}"
     match_score = raw.get("matchScore") or raw.get("score")
+    salary = raw.get("salaryDesc") or raw.get("salary") or None
+    posted_at = raw.get("publishTimeDesc") or raw.get("publishTime") or None
+    work_model = raw.get("workModel") or None
     return {
         "id": str(job_id),
         "title": title,
@@ -55,6 +58,9 @@ def _normalize_job(raw: dict) -> Optional[dict]:
         "location": location,
         "url": job_url,
         "matchScore": match_score,
+        "salary": salary,
+        "postedAt": posted_at,
+        "workModel": work_model,
     }
 
 
