@@ -34,32 +34,32 @@ def _extract_jobs_from_payload(payload) -> list[dict]:
 
 def _normalize_job(raw: dict) -> Optional[dict]:
     """Normalize a raw job dict into a consistent schema."""
-    job_id = raw.get("id") or raw.get("jobId") or raw.get("job_id")
+    job_id = raw.get("jobId") or raw.get("id") or raw.get("job_id")
     if not job_id:
         return None
 
     title = (
-        raw.get("title")
-        or raw.get("jobTitle")
+        raw.get("jobTitle")
+        or raw.get("title")
         or raw.get("job_title")
         or raw.get("position")
         or "Unknown Title"
     )
     company = (
-        raw.get("company")
-        or raw.get("companyName")
+        raw.get("companyName")
+        or raw.get("company")
         or raw.get("company_name")
+        or raw.get("employerName")
         or raw.get("employer")
         or "Unknown Company"
     )
     location = (
-        raw.get("location")
-        or raw.get("jobLocation")
+        raw.get("jobLocation")
+        or raw.get("location")
         or raw.get("city")
-        or "Unknown Location"
+        or ("Remote" if raw.get("isRemote") else "Unknown Location")
     )
 
-    # Try to build a direct job URL; fall back to the base jobs page
     job_url = (
         raw.get("url")
         or raw.get("jobUrl")
@@ -107,15 +107,13 @@ async def scrape_jobs() -> list[dict]:
             return
         try:
             body = await response.json()
-            # Print raw structure of the jobs endpoint so we can see field names
-            if "recommend/landing/jobs" in response.url or "jobs" in response.url:
-                import json as _json
-                preview = _json.dumps(body)[:500]
-                print(f"[scraper] Jobs endpoint response preview: {preview}")
-            found = _extract_jobs_from_payload(body)
-            if found:
-                print(f"[scraper] Intercepted {len(found)} job(s) from {response.url}")
-                captured_jobs.extend(found)
+            # Directly extract from the known JobRight jobs endpoint
+            if "recommend/landing/jobs" in response.url or "recent/landing/jobs" in response.url:
+                job_list = body.get("result", {}).get("jobList", [])
+                for item in job_list:
+                    job_result = item.get("jobResult", item)
+                    captured_jobs.append(job_result)
+                print(f"[scraper] Intercepted {len(job_list)} job(s) from {response.url}")
         except Exception:
             pass  # Not valid JSON or parse error — skip silently
 
@@ -134,13 +132,14 @@ async def scrape_jobs() -> list[dict]:
         # Wait for initial API calls to fire
         await asyncio.sleep(5)
 
-        # Detect redirect to login page
+        # Detect redirect to login page — check for login-specific indicators,
+        # not URL path (SPA shell always loads at / before client-side routing)
         current_url = page.url
         print(f"[scraper] Landed on: {current_url}")
-        if not any(x in current_url for x in ("jobs", "recommend", "dashboard")):
-            print(f"[scraper] Redirected away from jobs page — attempting login...")
+        is_login_page = await page.locator('input[type="password"]').count() > 0
+        if is_login_page:
+            print("[scraper] Login page detected — attempting login...")
             await _handle_login(page)
-            # Navigate again after login
             await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
             await asyncio.sleep(5)
             print(f"[scraper] After login, landed on: {page.url}")
