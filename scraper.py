@@ -122,12 +122,12 @@ async def _apply_filters(page: Page) -> None:
     try:
         # Look for a "Job Type" filter button and click it
         job_type_btn = page.get_by_text("Job Type", exact=False).first
-        await job_type_btn.click(timeout=5_000)
+        await job_type_btn.click(timeout=10_000)
         await asyncio.sleep(1)
 
         # Click "Internship" option
-        await page.get_by_text("Internship", exact=True).first.click(timeout=5_000)
-        await asyncio.sleep(3)
+        await page.get_by_text("Internship", exact=True).first.click(timeout=10_000)
+        await asyncio.sleep(5)
         print("[scraper] Applied Job Type: Internship filter.")
     except Exception as e:
         print(f"[scraper] Could not apply Job Type filter: {e}")
@@ -135,7 +135,7 @@ async def _apply_filters(page: Page) -> None:
     try:
         # Look for "Job Function" filter
         job_fn_btn = page.get_by_text("Job Function", exact=False).first
-        await job_fn_btn.click(timeout=5_000)
+        await job_fn_btn.click(timeout=10_000)
         await asyncio.sleep(1)
 
         for label in ["Full Stack Engineer", "Backend Engineer", "Python Engineer", "C/C++ Engineer"]:
@@ -189,33 +189,40 @@ async def scrape_jobs() -> list[dict]:
         page = context.pages[0] if context.pages else await context.new_page()
         page.on("response", on_response)
 
+        # Log all POST/PUT requests to jobright API so we can learn the filter format
+        async def on_request(request):
+            if "jobright.ai/swan" in request.url and request.method in ("POST", "PUT"):
+                try:
+                    body = request.post_data
+                    print(f"[scraper] REQUEST {request.method} {request.url} body={body}")
+                except Exception:
+                    pass
+        page.on("request", on_request)
+
         print(f"[scraper] Navigating to {config.JOBS_URL}...")
         await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
-        # Wait for initial API calls to fire
-        await asyncio.sleep(5)
 
-        # Detect redirect to login page — check for login-specific indicators,
-        # not URL path (SPA shell always loads at / before client-side routing)
-        current_url = page.url
-        print(f"[scraper] Landed on: {current_url}")
+        # Wait for the React app to fully render (SPA needs time after domcontentloaded)
+        print("[scraper] Waiting for page to render...")
+        await asyncio.sleep(12)
+
+        # Detect redirect to login page
         is_login_page = await page.locator('input[type="password"]').count() > 0
         if is_login_page:
             print("[scraper] Login page detected — attempting login...")
             await _handle_login(page)
             await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(5)
-            print(f"[scraper] After login, landed on: {page.url}")
+            await asyncio.sleep(12)
 
-        # Apply filters: Job Type = Internship, then job function keywords
+        # Clear jobs captured during initial load — we want only the filtered results
+        captured_jobs.clear()
+
+        # Apply filters and wait for the filtered API response
         await _apply_filters(page)
 
-        # Brief pause + scroll to trigger lazy-loaded content
-        await asyncio.sleep(3)
+        # Scroll to trigger lazy-loaded content
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         await asyncio.sleep(2)
-        # Scroll back up to catch any top-loaded content as well
-        await page.evaluate("window.scrollTo(0, 0)")
-        await asyncio.sleep(1)
 
         await context.close()
 
