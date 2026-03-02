@@ -62,27 +62,44 @@ async def scrape_jobs() -> list[dict]:
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     })
 
-    # Check current filter state
+    # Get saved filter state to use as request params
+    filter_data = {}
     try:
         filter_resp = session.post(FILTER_API, timeout=10)
-        import json as _json
-        print(f"[scraper] Filter state: {_json.dumps(filter_resp.json())[:500]}")
+        filter_data = filter_resp.json().get("result", {})
+        taxonomy_ids = [t["taxonomyId"] for t in filter_data.get("jobTaxonomyList", [])]
+        print(f"[scraper] Filters: jobTypes={filter_data.get('jobTypes')} seniority={filter_data.get('seniority')} taxonomies={taxonomy_ids}")
     except Exception as e:
         print(f"[scraper] Could not fetch filter state: {e}")
 
-    # Try recommend endpoint, fall back to recent
-    print("[scraper] Fetching jobs from API...")
+    # Build filter params for the jobs API
+    taxonomy_ids = [t["taxonomyId"] for t in filter_data.get("jobTaxonomyList", [])]
+    params = {
+        "jobTypes": filter_data.get("jobTypes", []),
+        "seniority": filter_data.get("seniority", []),
+        "jobTaxonomyList": [{"taxonomyId": t} for t in taxonomy_ids],
+        "country": filter_data.get("country", "US"),
+    }
+
+    print("[scraper] Fetching jobs from API with filters...")
     job_list = []
-    for url in [JOBS_API, RECENT_API]:
+
+    # Try POST with filter body first, then plain GET
+    for method, kwargs in [
+        ("POST", {"json": params}),
+        ("GET",  {"params": {"jobTypes": ",".join(str(x) for x in filter_data.get("jobTypes", [])),
+                             "seniority": ",".join(str(x) for x in filter_data.get("seniority", []))}}),
+    ]:
         try:
-            resp = session.get(url, timeout=30)
+            resp = session.request(method, JOBS_API, timeout=30, **kwargs)
             resp.raise_for_status()
-            body = resp.json()
-            jobs = body.get("result", {}).get("jobList", [])
-            print(f"[scraper] {url} → {len(jobs)} jobs")
-            job_list.extend(jobs)
+            jobs = resp.json().get("result", {}).get("jobList", [])
+            print(f"[scraper] {method} {JOBS_API} → {len(jobs)} jobs")
+            if jobs:
+                job_list = jobs
+                break
         except Exception as e:
-            print(f"[scraper] {url} failed: {e}")
+            print(f"[scraper] {method} failed: {e}")
     print(f"[scraper] Got {len(job_list)} jobs from API")
 
     captured = []
