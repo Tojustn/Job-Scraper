@@ -107,7 +107,11 @@ async def scrape_jobs() -> list[dict]:
             return
         try:
             body = await response.json()
-            print(f"[scraper] JSON response from: {response.url}")
+            # Print raw structure of the jobs endpoint so we can see field names
+            if "recommend/landing/jobs" in response.url or "jobs" in response.url:
+                import json as _json
+                preview = _json.dumps(body)[:500]
+                print(f"[scraper] Jobs endpoint response preview: {preview}")
             found = _extract_jobs_from_payload(body)
             if found:
                 print(f"[scraper] Intercepted {len(found)} job(s) from {response.url}")
@@ -126,7 +130,9 @@ async def scrape_jobs() -> list[dict]:
         page.on("response", on_response)
 
         print(f"[scraper] Navigating to {config.JOBS_URL}...")
-        await page.goto(config.JOBS_URL, wait_until="networkidle", timeout=60_000)
+        await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
+        # Wait for initial API calls to fire
+        await asyncio.sleep(5)
 
         # Detect redirect to login page
         current_url = page.url
@@ -135,14 +141,15 @@ async def scrape_jobs() -> list[dict]:
             print(f"[scraper] Redirected away from jobs page — attempting login...")
             await _handle_login(page)
             # Navigate again after login
-            await page.goto(config.JOBS_URL, wait_until="networkidle", timeout=60_000)
+            await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
+            await asyncio.sleep(5)
             print(f"[scraper] After login, landed on: {page.url}")
 
         # Click "Most Recent" tab to get chronological results
         try:
             await page.get_by_text("Most Recent", exact=True).first.click()
             print("[scraper] Clicked 'Most Recent' tab.")
-            await page.wait_for_load_state("networkidle", timeout=15_000)
+            await asyncio.sleep(3)
         except Exception:
             print("[scraper] Could not find 'Most Recent' tab — using default tab.")
 
