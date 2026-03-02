@@ -47,6 +47,14 @@ jobs:
           HEADLESS: 'true'
         run: python main.py --once
 
+      - name: Upload debug screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshot
+          path: debug_screenshot.png
+          if-no-files-found: ignore
+
       - name: Commit updated seen_jobs.json
         run: |
           git config user.name "github-actions[bot]"

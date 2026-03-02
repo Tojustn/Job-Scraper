@@ -199,20 +199,29 @@ async def scrape_jobs() -> list[dict]:
                     pass
         page.on("request", on_request)
 
+        # Always log in explicitly — GitHub Actions has no saved session
+        print("[scraper] Navigating to login page...")
+        await page.goto("https://jobright.ai/login", wait_until="domcontentloaded", timeout=30_000)
+        await asyncio.sleep(3)
+
+        if await page.locator('input[type="password"]').count() > 0:
+            await _handle_login(page)
+        else:
+            print("[scraper] Already authenticated, skipping login.")
+
+        # Now navigate to jobs page and wait for React to fully render
         print(f"[scraper] Navigating to {config.JOBS_URL}...")
         await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
-
-        # Wait for the React app to fully render (SPA needs time after domcontentloaded)
         print("[scraper] Waiting for page to render...")
-        await asyncio.sleep(12)
+        await asyncio.sleep(15)
 
-        # Detect redirect to login page
-        is_login_page = await page.locator('input[type="password"]').count() > 0
-        if is_login_page:
-            print("[scraper] Login page detected — attempting login...")
-            await _handle_login(page)
-            await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(12)
+        # Take a screenshot so we can see what the page looks like
+        await page.screenshot(path="debug_screenshot.png", full_page=False)
+        print(f"[scraper] Screenshot saved. Current URL: {page.url}")
+
+        # Log all visible button text to find the right filter selectors
+        buttons = await page.locator("button").all_text_contents()
+        print(f"[scraper] Visible buttons: {buttons[:20]}")
 
         # Clear jobs captured during initial load — we want only the filtered results
         captured_jobs.clear()
