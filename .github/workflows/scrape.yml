@@ -43,7 +43,7 @@ jobs:
           JOBRIGHT_EMAIL: ${{ secrets.JOBRIGHT_EMAIL }}
           JOBRIGHT_PASSWORD: ${{ secrets.JOBRIGHT_PASSWORD }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          JOBS_URL: ${{ secrets.JOBS_URL }}
+          JOBS_URL: 'https://jobright.ai/jobs/recommend'
           HEADLESS: 'true'
         run: python main.py --once
 
