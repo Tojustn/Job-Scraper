@@ -1,10 +1,9 @@
-import asyncio
-import json
+import requests
 from typing import Optional
 
-from playwright.async_api import async_playwright, Response, Page
-
 import config
+
+JOBS_API = "https://jobright.ai/swan/recommend/landing/jobs"
 
 ROLE_KEYWORDS = [
     "full stack", "fullstack", "full-stack",
@@ -20,78 +19,27 @@ INTERNSHIP_KEYWORDS = ["intern", "internship", "co-op", "coop"]
 def _matches_filter(job: dict) -> bool:
     title = (job.get("jobTitle") or job.get("title") or "").lower()
     seniority = (job.get("jobSeniority") or "").lower()
-
     is_internship = (
         any(k in seniority for k in INTERNSHIP_KEYWORDS)
         or any(k in title for k in INTERNSHIP_KEYWORDS)
     )
     is_target_role = any(k in title for k in ROLE_KEYWORDS)
-
     return is_internship and is_target_role
 
 
-def _is_job_like(obj: dict) -> bool:
-    """Heuristic: an object looks like a job if it has id + title + company fields."""
-    return (
-        isinstance(obj, dict)
-        and any(k in obj for k in ("id", "jobId", "job_id"))
-        and any(k in obj for k in ("title", "jobTitle", "job_title", "position"))
-        and any(k in obj for k in ("company", "companyName", "company_name", "employer"))
-    )
-
-
-def _extract_jobs_from_payload(payload) -> list[dict]:
-    """Recursively search a parsed JSON payload for arrays of job-like objects."""
-    jobs = []
-    if isinstance(payload, list):
-        if all(_is_job_like(item) for item in payload) and payload:
-            jobs.extend(payload)
-        else:
-            for item in payload:
-                jobs.extend(_extract_jobs_from_payload(item))
-    elif isinstance(payload, dict):
-        for value in payload.values():
-            jobs.extend(_extract_jobs_from_payload(value))
-    return jobs
-
-
 def _normalize_job(raw: dict) -> Optional[dict]:
-    """Normalize a raw job dict into a consistent schema."""
-    job_id = raw.get("jobId") or raw.get("id") or raw.get("job_id")
+    job_id = raw.get("jobId") or raw.get("id")
     if not job_id:
         return None
-
-    title = (
-        raw.get("jobTitle")
-        or raw.get("title")
-        or raw.get("job_title")
-        or raw.get("position")
-        or "Unknown Title"
-    )
-    company = (
-        raw.get("companyName")
-        or raw.get("company")
-        or raw.get("company_name")
-        or raw.get("employerName")
-        or raw.get("employer")
-        or "Unknown Company"
-    )
+    title = raw.get("jobTitle") or raw.get("title") or "Unknown Title"
+    company = raw.get("companyName") or raw.get("company") or "Unknown Company"
     location = (
         raw.get("jobLocation")
         or raw.get("location")
-        or raw.get("city")
         or ("Remote" if raw.get("isRemote") else "Unknown Location")
     )
-
-    job_url = (
-        raw.get("url")
-        or raw.get("jobUrl")
-        or raw.get("link")
-        or f"https://jobright.ai/jobs/info/{job_id}"
-    )
-
-    match_score = raw.get("matchScore") or raw.get("match_score") or raw.get("score")
-
+    job_url = raw.get("url") or f"https://jobright.ai/jobs/info/{job_id}"
+    match_score = raw.get("matchScore") or raw.get("score")
     return {
         "id": str(job_id),
         "title": title,
@@ -102,167 +50,48 @@ def _normalize_job(raw: dict) -> Optional[dict]:
     }
 
 
-async def _handle_login(page: Page) -> None:
-    """Click Sign In on homepage, fill email/password modal, submit."""
-    print("[scraper] Attempting login via Sign In button...")
-    try:
-        # Click the Sign In button to open the login modal
-        await page.get_by_text("Sign In", exact=True).first.click(timeout=8_000)
-        await asyncio.sleep(2)
-
-        # Fill email (some forms are single-step, some require pressing Enter first)
-        await page.wait_for_selector('input[type="email"], input[name="email"]', timeout=10_000)
-        await page.fill('input[type="email"], input[name="email"]', config.JOBRIGHT_EMAIL)
-
-        # If password field not visible yet, press Enter/click Continue for multi-step forms
-        if await page.locator('input[type="password"]').count() == 0:
-            await page.keyboard.press("Enter")
-            await asyncio.sleep(2)
-
-        # Fill password
-        await page.wait_for_selector('input[type="password"]', timeout=10_000)
-        await page.fill('input[type="password"]', config.JOBRIGHT_PASSWORD)
-        await page.keyboard.press("Enter")
-        await asyncio.sleep(5)
-        print(f"[scraper] Login submitted. Current URL: {page.url}")
-    except Exception as e:
-        print(f"[scraper] Login attempt failed: {e}")
-
-
-async def _apply_filters(page: Page) -> None:
-    """Try to apply Job Type: Internship filter on the page."""
-    try:
-        # Look for a "Job Type" filter button and click it
-        job_type_btn = page.get_by_text("Job Type", exact=False).first
-        await job_type_btn.click(timeout=10_000)
-        await asyncio.sleep(1)
-
-        # Click "Internship" option
-        await page.get_by_text("Internship", exact=True).first.click(timeout=10_000)
-        await asyncio.sleep(5)
-        print("[scraper] Applied Job Type: Internship filter.")
-    except Exception as e:
-        print(f"[scraper] Could not apply Job Type filter: {e}")
-
-    try:
-        # Look for "Job Function" filter
-        job_fn_btn = page.get_by_text("Job Function", exact=False).first
-        await job_fn_btn.click(timeout=10_000)
-        await asyncio.sleep(1)
-
-        for label in ["Full Stack Engineer", "Backend Engineer", "Python Engineer", "C/C++ Engineer"]:
-            try:
-                await page.get_by_text(label, exact=True).first.click(timeout=3_000)
-                await asyncio.sleep(0.5)
-                print(f"[scraper] Selected job function: {label}")
-            except Exception:
-                print(f"[scraper] Could not find job function option: {label}")
-
-        # Close the dropdown by pressing Escape
-        await page.keyboard.press("Escape")
-        await asyncio.sleep(3)
-    except Exception as e:
-        print(f"[scraper] Could not apply Job Function filter: {e}")
-
-
 async def scrape_jobs() -> list[dict]:
-    """
-    Open the JobRight jobs page using a persistent browser context, intercept API
-    responses, and return a deduplicated list of normalized job dicts.
-    """
-    captured_jobs: list[dict] = []
+    session = requests.Session()
+    session.cookies.set("SESSION_ID", config.JOBRIGHT_SESSION_ID, domain="jobright.ai")
+    session.headers.update({
+        "accept": "application/json, text/plain, */*",
+        "referer": "https://jobright.ai/jobs/recommend",
+        "x-client-type": "web",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    })
 
-    async def on_response(response: Response) -> None:
-        content_type = response.headers.get("content-type", "")
-        if "application/json" not in content_type:
-            return
-        try:
-            body = await response.json()
-            # Directly extract from the known JobRight jobs endpoint
-            if "recommend/landing/jobs" in response.url or "recent/landing/jobs" in response.url:
-                job_list = body.get("result", {}).get("jobList", [])
-                for item in job_list:
-                    job_result = item.get("jobResult", {})
-                    # Merge parent item fields (contains companyName etc.) with jobResult
-                    merged = {**item, **job_result}
-                    merged.pop("jobResult", None)
-                    captured_jobs.append(merged)
-                print(f"[scraper] Intercepted {len(job_list)} job(s) from {response.url}")
-        except Exception:
-            pass  # Not valid JSON or parse error — skip silently
+    print("[scraper] Fetching jobs from API...")
+    try:
+        resp = session.get(JOBS_API, timeout=30)
+        resp.raise_for_status()
+        body = resp.json()
+    except Exception as e:
+        print(f"[scraper] API request failed: {e}")
+        return []
 
-    async with async_playwright() as pw:
-        context = await pw.chromium.launch_persistent_context(
-            user_data_dir=config.BROWSER_DATA_DIR,
-            headless=config.HEADLESS,
-            args=["--no-sandbox"],
-        )
+    job_list = body.get("result", {}).get("jobList", [])
+    print(f"[scraper] Got {len(job_list)} jobs from API")
 
-        page = context.pages[0] if context.pages else await context.new_page()
-        page.on("response", on_response)
+    captured = []
+    for item in job_list:
+        job_result = item.get("jobResult", {})
+        merged = {**item, **job_result}
+        merged.pop("jobResult", None)
+        captured.append(merged)
 
-        # Log all POST/PUT requests to jobright API so we can learn the filter format
-        async def on_request(request):
-            if "jobright.ai/swan" in request.url and request.method in ("POST", "PUT"):
-                try:
-                    body = request.post_data
-                    print(f"[scraper] REQUEST {request.method} {request.url} body={body}")
-                except Exception:
-                    pass
-        page.on("request", on_request)
-
-        # Navigate to homepage and log in if needed
-        print("[scraper] Navigating to homepage...")
-        await page.goto("https://jobright.ai/", wait_until="domcontentloaded", timeout=30_000)
-        await asyncio.sleep(3)
-
-        sign_in_count = await page.get_by_text("Sign In", exact=True).count()
-        print(f"[scraper] 'Sign In' buttons visible: {sign_in_count}")
-        if sign_in_count > 0:
-            await _handle_login(page)
-        else:
-            print("[scraper] Already logged in.")
-
-        # Navigate to jobs page and wait for React to fully render
-        print(f"[scraper] Navigating to {config.JOBS_URL}...")
-        await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
-        print("[scraper] Waiting for page to render...")
-        await asyncio.sleep(15)
-
-        # Log page state for debugging
-        print(f"[scraper] Current URL: {page.url}")
-        buttons = await page.locator("button").all_text_contents()
-        print(f"[scraper] Visible buttons: {buttons[:20]}")
-
-        # Clear jobs captured during initial load — we want only the filtered results
-        captured_jobs.clear()
-
-        # Apply filters and wait for the filtered API response
-        await _apply_filters(page)
-
-        # Scroll to trigger lazy-loaded content
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await asyncio.sleep(2)
-
-        await context.close()
-
-    # Normalize and deduplicate by job ID
     seen_ids: set[str] = set()
     normalized: list[dict] = []
-    for raw in captured_jobs:
+    for raw in captured:
         job = _normalize_job(raw)
         if job and job["id"] not in seen_ids:
             seen_ids.add(job["id"])
             normalized.append(job)
 
-    if not normalized:
-        print(
-            "[scraper] WARNING: No jobs were intercepted. "
-            "The API structure may have changed — inspect network traffic manually."
-        )
-        return normalized
-
-    print(f"[scraper] Total jobs before filter: {len(normalized)}")
+    print(f"[scraper] Total jobs: {len(normalized)}")
     filtered = [j for j in normalized if _matches_filter(j)]
-    print(f"[scraper] Jobs matching filter (internship + role): {len(filtered)}")
+    print(f"[scraper] Matching internship+role filter: {len(filtered)}")
+
+    if not filtered:
+        print("[scraper] No matches. Session may have expired or no internship roles in current recommendations.")
+
     return filtered

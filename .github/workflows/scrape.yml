@@ -3,13 +3,13 @@ name: JobRight Scraper
 on:
   schedule:
     - cron: '*/30 * * * *'  # Every 30 minutes
-  workflow_dispatch:          # Allow manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   scrape:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
-      contents: write  # Needed to commit seen_jobs.json back
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -26,34 +26,15 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('requirements.txt') }}
-
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Install Playwright Chromium + system deps
-        run: playwright install chromium --with-deps
 
       - name: Run scraper
         env:
-          JOBRIGHT_EMAIL: ${{ secrets.JOBRIGHT_EMAIL }}
-          JOBRIGHT_PASSWORD: ${{ secrets.JOBRIGHT_PASSWORD }}
+          JOBRIGHT_SESSION_ID: ${{ secrets.JOBRIGHT_SESSION_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           JOBS_URL: 'https://jobright.ai/jobs/recommend'
-          HEADLESS: 'true'
         run: python main.py --once
-
-      - name: Upload debug screenshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screenshot
-          path: debug_screenshot.png
-          if-no-files-found: ignore
 
       - name: Commit updated seen_jobs.json
         run: |

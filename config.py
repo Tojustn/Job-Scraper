@@ -15,8 +15,9 @@ def _optional(key: str, default: str) -> str:
     return os.getenv(key, default)
 
 
-JOBRIGHT_EMAIL: str = _require("JOBRIGHT_EMAIL")
-JOBRIGHT_PASSWORD: str = _require("JOBRIGHT_PASSWORD")
+JOBRIGHT_EMAIL: str = _optional("JOBRIGHT_EMAIL", "")
+JOBRIGHT_PASSWORD: str = _optional("JOBRIGHT_PASSWORD", "")
+JOBRIGHT_SESSION_ID: str = _require("JOBRIGHT_SESSION_ID")
 DISCORD_WEBHOOK_URL: str = _require("DISCORD_WEBHOOK_URL")
 JOBS_URL: str = _optional("JOBS_URL", "https://jobright.ai/jobs")
 CHECK_INTERVAL_MINUTES: int = int(_optional("CHECK_INTERVAL_MINUTES", "30"))
