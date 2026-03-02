@@ -72,34 +72,36 @@ async def scrape_jobs() -> list[dict]:
     except Exception as e:
         print(f"[scraper] Could not fetch filter state: {e}")
 
-    # Build filter params for the jobs API
-    taxonomy_ids = [t["taxonomyId"] for t in filter_data.get("jobTaxonomyList", [])]
-    params = {
-        "jobTypes": filter_data.get("jobTypes", []),
-        "seniority": filter_data.get("seniority", []),
-        "jobTaxonomyList": [{"taxonomyId": t} for t in taxonomy_ids],
-        "country": filter_data.get("country", "US"),
-    }
-
     print("[scraper] Fetching jobs from API with filters...")
     job_list = []
 
-    # Try POST with filter body first, then plain GET
-    for method, kwargs in [
-        ("POST", {"json": params}),
-        ("GET",  {"params": {"jobTypes": ",".join(str(x) for x in filter_data.get("jobTypes", [])),
-                             "seniority": ",".join(str(x) for x in filter_data.get("seniority", []))}}),
-    ]:
+    # POST the exact filter state the UI uses
+    try:
+        resp = session.post(JOBS_API, json=filter_data, timeout=30)
+        resp.raise_for_status()
+        jobs = resp.json().get("result", {}).get("jobList", [])
+        print(f"[scraper] POST with filter_data → {len(jobs)} jobs")
+        if jobs:
+            job_list = jobs
+    except Exception as e:
+        print(f"[scraper] POST with filter_data failed: {e}")
+
+    # Fall back to plain GET
+    if not job_list:
         try:
-            resp = session.request(method, JOBS_API, timeout=30, **kwargs)
+            resp = session.get(JOBS_API, timeout=30)
             resp.raise_for_status()
-            jobs = resp.json().get("result", {}).get("jobList", [])
-            print(f"[scraper] {method} {JOBS_API} → {len(jobs)} jobs")
-            if jobs:
-                job_list = jobs
-                break
+            job_list = resp.json().get("result", {}).get("jobList", [])
+            print(f"[scraper] GET (unfiltered) → {len(job_list)} jobs")
         except Exception as e:
-            print(f"[scraper] {method} failed: {e}")
+            print(f"[scraper] GET failed: {e}")
+
+    # Print raw keys of first item to find company field
+    if job_list:
+        first = job_list[0]
+        print(f"[scraper] Top-level item keys: {list(first.keys())}")
+        if "jobResult" in first:
+            print(f"[scraper] jobResult keys: {list(first['jobResult'].keys())}")
     print(f"[scraper] Got {len(job_list)} jobs from API")
 
     captured = []
