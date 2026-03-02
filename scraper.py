@@ -103,18 +103,30 @@ def _normalize_job(raw: dict) -> Optional[dict]:
 
 
 async def _handle_login(page: Page) -> None:
-    """Fill and submit the email/password login form."""
-    print("[scraper] Session expired or not logged in — attempting login...")
+    """Click Sign In on homepage, fill email/password modal, submit."""
+    print("[scraper] Attempting login via Sign In button...")
     try:
+        # Click the Sign In button to open the login modal
+        await page.get_by_text("Sign In", exact=True).first.click(timeout=8_000)
+        await asyncio.sleep(2)
+
+        # Fill email (some forms are single-step, some require pressing Enter first)
         await page.wait_for_selector('input[type="email"], input[name="email"]', timeout=10_000)
         await page.fill('input[type="email"], input[name="email"]', config.JOBRIGHT_EMAIL)
-        await page.fill('input[type="password"], input[name="password"]', config.JOBRIGHT_PASSWORD)
-        await page.click('button[type="submit"]')
-        await page.wait_for_load_state("networkidle", timeout=30_000)
-        print("[scraper] Login submitted, waiting for navigation...")
+
+        # If password field not visible yet, press Enter/click Continue for multi-step forms
+        if await page.locator('input[type="password"]').count() == 0:
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(2)
+
+        # Fill password
+        await page.wait_for_selector('input[type="password"]', timeout=10_000)
+        await page.fill('input[type="password"]', config.JOBRIGHT_PASSWORD)
+        await page.keyboard.press("Enter")
+        await asyncio.sleep(5)
+        print(f"[scraper] Login submitted. Current URL: {page.url}")
     except Exception as e:
         print(f"[scraper] Login attempt failed: {e}")
-        print("[scraper] If you use Google/LinkedIn SSO, run `python login.py` once to save your session.")
 
 
 async def _apply_filters(page: Page) -> None:
@@ -199,27 +211,26 @@ async def scrape_jobs() -> list[dict]:
                     pass
         page.on("request", on_request)
 
-        # Always log in explicitly — GitHub Actions has no saved session
-        print("[scraper] Navigating to login page...")
-        await page.goto("https://jobright.ai/login", wait_until="domcontentloaded", timeout=30_000)
+        # Navigate to homepage and log in if needed
+        print("[scraper] Navigating to homepage...")
+        await page.goto("https://jobright.ai/", wait_until="domcontentloaded", timeout=30_000)
         await asyncio.sleep(3)
 
-        if await page.locator('input[type="password"]').count() > 0:
+        sign_in_count = await page.get_by_text("Sign In", exact=True).count()
+        print(f"[scraper] 'Sign In' buttons visible: {sign_in_count}")
+        if sign_in_count > 0:
             await _handle_login(page)
         else:
-            print("[scraper] Already authenticated, skipping login.")
+            print("[scraper] Already logged in.")
 
-        # Now navigate to jobs page and wait for React to fully render
+        # Navigate to jobs page and wait for React to fully render
         print(f"[scraper] Navigating to {config.JOBS_URL}...")
         await page.goto(config.JOBS_URL, wait_until="domcontentloaded", timeout=60_000)
         print("[scraper] Waiting for page to render...")
         await asyncio.sleep(15)
 
-        # Take a screenshot so we can see what the page looks like
-        await page.screenshot(path="debug_screenshot.png", full_page=False)
-        print(f"[scraper] Screenshot saved. Current URL: {page.url}")
-
-        # Log all visible button text to find the right filter selectors
+        # Log page state for debugging
+        print(f"[scraper] Current URL: {page.url}")
         buttons = await page.locator("button").all_text_contents()
         print(f"[scraper] Visible buttons: {buttons[:20]}")
 
