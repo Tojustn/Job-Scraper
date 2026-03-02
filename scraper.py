@@ -118,6 +118,8 @@ async def scrape_jobs() -> list[dict]:
             normalized.append(job)
 
     print(f"[scraper] Total jobs: {len(normalized)}")
+    for r in captured:
+        print(f"[scraper]   {r.get('jobTitle','?')} | {r.get('jobSeniority','?')} | {r.get('companyName','?')}")
     filtered = [j for j in normalized if _matches_filter(j)]
     print(f"[scraper] Matching internship+role filter: {len(filtered)}")
 
