@@ -4,6 +4,8 @@ from typing import Optional
 import config
 
 JOBS_API = "https://jobright.ai/swan/recommend/landing/jobs"
+RECENT_API = "https://jobright.ai/swan/recent/landing/jobs"
+FILTER_API = "https://jobright.ai/swan/filter/get/filter"
 
 ROLE_KEYWORDS = [
     "full stack", "fullstack", "full-stack",
@@ -60,16 +62,27 @@ async def scrape_jobs() -> list[dict]:
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     })
 
-    print("[scraper] Fetching jobs from API...")
+    # Check current filter state
     try:
-        resp = session.get(JOBS_API, timeout=30)
-        resp.raise_for_status()
-        body = resp.json()
+        filter_resp = session.post(FILTER_API, timeout=10)
+        import json as _json
+        print(f"[scraper] Filter state: {_json.dumps(filter_resp.json())[:500]}")
     except Exception as e:
-        print(f"[scraper] API request failed: {e}")
-        return []
+        print(f"[scraper] Could not fetch filter state: {e}")
 
-    job_list = body.get("result", {}).get("jobList", [])
+    # Try recommend endpoint, fall back to recent
+    print("[scraper] Fetching jobs from API...")
+    job_list = []
+    for url in [JOBS_API, RECENT_API]:
+        try:
+            resp = session.get(url, timeout=30)
+            resp.raise_for_status()
+            body = resp.json()
+            jobs = body.get("result", {}).get("jobList", [])
+            print(f"[scraper] {url} → {len(jobs)} jobs")
+            job_list.extend(jobs)
+        except Exception as e:
+            print(f"[scraper] {url} failed: {e}")
     print(f"[scraper] Got {len(job_list)} jobs from API")
 
     captured = []
