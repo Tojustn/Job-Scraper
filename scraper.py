@@ -107,6 +107,7 @@ async def scrape_jobs() -> list[dict]:
             return
         try:
             body = await response.json()
+            print(f"[scraper] JSON response from: {response.url}")
             found = _extract_jobs_from_payload(body)
             if found:
                 print(f"[scraper] Intercepted {len(found)} job(s) from {response.url}")
@@ -129,10 +130,13 @@ async def scrape_jobs() -> list[dict]:
 
         # Detect redirect to login page
         current_url = page.url
-        if "login" in current_url or "signin" in current_url or "auth" in current_url:
+        print(f"[scraper] Landed on: {current_url}")
+        if not any(x in current_url for x in ("jobs", "recommend", "dashboard")):
+            print(f"[scraper] Redirected away from jobs page — attempting login...")
             await _handle_login(page)
             # Navigate again after login
             await page.goto(config.JOBS_URL, wait_until="networkidle", timeout=60_000)
+            print(f"[scraper] After login, landed on: {page.url}")
 
         # Click "Most Recent" tab to get chronological results
         try:
