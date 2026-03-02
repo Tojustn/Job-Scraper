@@ -3,16 +3,17 @@ from typing import Optional
 
 import config
 
-JOBS_API = "https://jobright.ai/swan/recommend/landing/jobs"
-RECENT_API = "https://jobright.ai/swan/recent/landing/jobs"
+LIST_API = "https://jobright.ai/swan/recommend/list/jobs"
 FILTER_API = "https://jobright.ai/swan/filter/get/filter"
 
 ROLE_KEYWORDS = [
     "full stack", "fullstack", "full-stack",
+    "frontend", "front end", "front-end",
     "backend", "back end", "back-end",
     "python",
     "c++", "c/c++",
     "software engineer", "software developer", "swe",
+    "engineer",
 ]
 
 INTERNSHIP_KEYWORDS = ["intern", "internship", "co-op", "coop"]
@@ -34,7 +35,12 @@ def _normalize_job(raw: dict) -> Optional[dict]:
     if not job_id:
         return None
     title = raw.get("jobTitle") or raw.get("title") or "Unknown Title"
-    company = raw.get("companyName") or raw.get("company") or "Unknown Company"
+    company = (
+        raw.get("companyName")
+        or raw.get("name")
+        or raw.get("company")
+        or "Unknown Company"
+    )
     location = (
         raw.get("jobLocation")
         or raw.get("location")
@@ -52,6 +58,17 @@ def _normalize_job(raw: dict) -> Optional[dict]:
     }
 
 
+def _extract_items(job_list: list) -> list:
+    """Merge jobResult + companyResult into a flat dict per job."""
+    captured = []
+    for item in job_list:
+        job_result = item.get("jobResult", {})
+        company_result = item.get("companyResult", {})
+        merged = {**job_result, **company_result}
+        captured.append(merged)
+    return captured
+
+
 async def scrape_jobs() -> list[dict]:
     session = requests.Session()
     session.cookies.set("SESSION_ID", config.JOBRIGHT_SESSION_ID, domain="jobright.ai")
@@ -62,7 +79,7 @@ async def scrape_jobs() -> list[dict]:
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     })
 
-    # Get saved filter state to use as request params
+    # Get saved filter state
     filter_data = {}
     try:
         filter_resp = session.post(FILTER_API, timeout=10)
@@ -72,44 +89,27 @@ async def scrape_jobs() -> list[dict]:
     except Exception as e:
         print(f"[scraper] Could not fetch filter state: {e}")
 
-    print("[scraper] Fetching jobs from API with filters...")
+    print("[scraper] Fetching filtered jobs...")
     job_list = []
 
-    # POST the exact filter state the UI uses
+    # Use the paginated list endpoint which respects saved filter state
+    params = {
+        "refresh": "true",
+        "sortCondition": "1",  # 1 = Most Recent
+        "position": "0",
+        "count": "20",
+        "syncRerank": "false",
+    }
     try:
-        resp = session.post(JOBS_API, json=filter_data, timeout=30)
+        resp = session.get(LIST_API, params=params, timeout=30)
         resp.raise_for_status()
-        jobs = resp.json().get("result", {}).get("jobList", [])
-        print(f"[scraper] POST with filter_data → {len(jobs)} jobs")
-        if jobs:
-            job_list = jobs
+        body = resp.json()
+        job_list = body.get("result", {}).get("jobList", [])
+        print(f"[scraper] GET list/jobs → {len(job_list)} jobs")
     except Exception as e:
-        print(f"[scraper] POST with filter_data failed: {e}")
+        print(f"[scraper] GET list/jobs failed: {e}")
 
-    # Fall back to plain GET
-    if not job_list:
-        try:
-            resp = session.get(JOBS_API, timeout=30)
-            resp.raise_for_status()
-            job_list = resp.json().get("result", {}).get("jobList", [])
-            print(f"[scraper] GET (unfiltered) → {len(job_list)} jobs")
-        except Exception as e:
-            print(f"[scraper] GET failed: {e}")
-
-    # Print raw keys of first item to find company field
-    if job_list:
-        first = job_list[0]
-        print(f"[scraper] Top-level item keys: {list(first.keys())}")
-        if "jobResult" in first:
-            print(f"[scraper] jobResult keys: {list(first['jobResult'].keys())}")
-    print(f"[scraper] Got {len(job_list)} jobs from API")
-
-    captured = []
-    for item in job_list:
-        job_result = item.get("jobResult", {})
-        merged = {**item, **job_result}
-        merged.pop("jobResult", None)
-        captured.append(merged)
+    captured = _extract_items(job_list)
 
     seen_ids: set[str] = set()
     normalized: list[dict] = []
@@ -120,12 +120,10 @@ async def scrape_jobs() -> list[dict]:
             normalized.append(job)
 
     print(f"[scraper] Total jobs: {len(normalized)}")
-    for r in captured:
-        print(f"[scraper]   {r.get('jobTitle','?')} | {r.get('jobSeniority','?')} | {r.get('companyName','?')}")
     filtered = [j for j in normalized if _matches_filter(j)]
-    print(f"[scraper] Matching internship+role filter: {len(filtered)}")
+    print(f"[scraper] Matching filter: {len(filtered)}")
 
     if not filtered:
-        print("[scraper] No matches. Session may have expired or no internship roles in current recommendations.")
+        print("[scraper] No matches — session may be expired or no matching jobs right now.")
 
     return filtered
