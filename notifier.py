@@ -55,8 +55,9 @@ def send_discord_notification(job: dict) -> None:
             time.sleep(1)  # Stay well under Discord's rate limit
             return
         except requests.RequestException as e:
-            print(f"[notifier] Failed to send Discord notification: {e}")
-            return
+            print(f"[notifier] Attempt {attempt + 1} failed: {e}")
+            if attempt == 2:
+                return
 
 
 def send_email_digest(jobs: list) -> None:
