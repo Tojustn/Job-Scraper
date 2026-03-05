@@ -1,10 +1,20 @@
 import asyncio
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import config
 from scraper import scrape_jobs
-from notifier import send_discord_notification, send_email_digest
+from notifier import send_email_digest
 from storage import load_seen_jobs, save_seen_jobs
+
+_TZ = ZoneInfo("America/Chicago")
+
+
+def is_quiet_hours() -> bool:
+    """Returns True between 11pm and 8am Central time."""
+    hour = datetime.now(_TZ).hour
+    return hour >= 23 or hour < 8
 
 
 async def run_once(seen: set) -> set:
@@ -13,11 +23,13 @@ async def run_once(seen: set) -> set:
     new_jobs = [j for j in jobs if j["id"] not in seen]
 
     if new_jobs:
-        print(f"[main] {len(new_jobs)} new job(s) found — sending notifications...")
         for job in new_jobs:
-            send_discord_notification(job)
             seen.add(job["id"])
-        send_email_digest(new_jobs)
+        if is_quiet_hours():
+            print(f"[main] {len(new_jobs)} new job(s) found — quiet hours (11pm–8am CT), skipping notifications.")
+        else:
+            print(f"[main] {len(new_jobs)} new job(s) found — sending notifications...")
+            send_email_digest(new_jobs)
     else:
         print("[main] No new jobs since last check.")
 
