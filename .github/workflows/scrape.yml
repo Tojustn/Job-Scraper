@@ -1,8 +1,6 @@
 name: JobRight Scraper
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'  # Every 30 minutes
   workflow_dispatch:
 
 jobs:
